@@ -7,15 +7,25 @@ const connectDB = async () => {
   await mongoose.connect(process.env.MONGODB_URI!);
 };
 
-// เรียกใช้ Schema เดิมเพื่อป้องกัน Error
-const User = mongoose.models.User || mongoose.model('User', new mongoose.Schema({
+// 🛑 ต้องใส่ Schema ให้ครบทุกครั้ง เพื่อป้องกัน Vercel Build Error
+const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true },
   password: { type: String },
   balance: { type: Number, default: 50 },
   winCount: { type: Number, default: 0 },
   totalMatches: { type: Number, default: 0 },
-}));
-const History = mongoose.models.History || mongoose.model('History');
+});
+const User = mongoose.models.User || mongoose.model('User', UserSchema);
+
+const HistorySchema = new mongoose.Schema({
+  username: String, 
+  opponent: String, 
+  pnl: Number, 
+  result: String, 
+  symbol: String, 
+  date: { type: Date, default: Date.now }
+});
+const History = mongoose.models.History || mongoose.model('History', HistorySchema);
 
 export async function POST(req: Request) {
   try {
@@ -31,6 +41,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ success: false }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'System Error' }, { status: 500 });
   }
 }
