@@ -15,16 +15,14 @@ export default function ArenaPage() {
   const [isGameOver, setIsGameOver] = useState(false);
   const [roomId, setRoomId] = useState<string>("");
 
-  // Trading States
   const [currentPrice, setCurrentPrice] = useState<number>(0);
   const [position, setPosition] = useState<'NONE' | 'LONG' | 'SHORT'>('NONE');
   const [entryPrice, setEntryPrice] = useState<number>(0);
   const [unrealizedPnl, setUnrealizedPnl] = useState<number>(0);
   const [balance, setBalance] = useState<number>(1000);
 
-  // 1. Pusher Setup
+  // 1. Initial Setup & Lobby
   useEffect(() => {
-    // จำลอง Login
     const name = `Trader_${Math.floor(Math.random() * 1000)}`;
     setMyUser({ username: name, balance: 1000 });
 
@@ -32,10 +30,10 @@ export default function ArenaPage() {
       cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
     });
 
-    // ระบบ Matchmaking แบบ Serverless (ใช้ Public Channel)
-    const lobbyChannel = pusher.subscribe('lobby');
+    const lobbyChannel = pusher.subscribe('lobby-channel');
     
-    lobbyChannel.bind('match_start', (data: any) => {
+    // ฟังเหตุการณ์จับคู่สำเร็จ
+    lobbyChannel.bind('match-start', (data: any) => {
       const isMe = data.players.some((p: any) => p.username === name);
       if (isMe) {
         const enemy = data.players.find((p: any) => p.username !== name);
@@ -45,28 +43,24 @@ export default function ArenaPage() {
       }
     });
 
-    return () => {
-      pusher.unsubscribe('lobby');
-    };
+    return () => { pusher.unsubscribe('lobby-channel'); };
   }, []);
 
-  // 2. Room Channel Setup (เมื่อเข้าห้องแข่งแล้ว)
+  // 2. Arena Match Logic
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || gameState !== 'ARENA') return;
 
     const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
       cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
     });
-
     const channel = pusher.subscribe(roomId);
 
-    channel.bind('opponent_pnl', (data: any) => {
+    channel.bind('opponent-update', (data: any) => {
       if (data.username !== myUser?.username) {
-        setOpponent((prev: any) => ({ ...prev, currentPnl: data.pnl }));
+        setOpponent((prev: any) => prev ? { ...prev, currentPnl: data.pnl } : prev);
       }
     });
 
-    // ระบบนับเวลาจำลอง (เพราะไม่มี Server คุม ต้องใช้ Client ตัวหลักเป็นคนส่ง)
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -78,13 +72,10 @@ export default function ArenaPage() {
       });
     }, 1000);
 
-    return () => {
-      pusher.unsubscribe(roomId);
-      clearInterval(timer);
-    };
-  }, [roomId, myUser?.username]);
+    return () => { pusher.unsubscribe(roomId); clearInterval(timer); };
+  }, [roomId, gameState, myUser?.username]);
 
-  // 3. ส่ง PnL ไปให้คู่แข่งผ่าน API
+  // 3. Sync PnL (ส่งคะแนนผ่าน API)
   useEffect(() => {
     if (gameState === 'ARENA' && !isGameOver) {
       let pnl = 0;
@@ -92,11 +83,12 @@ export default function ArenaPage() {
       else if (position === 'SHORT') pnl = (entryPrice - currentPrice) * 10;
       setUnrealizedPnl(pnl);
 
-      // ส่งคะแนนผ่าน API Route
+      // ส่งคะแนนไปที่ Pusher ผ่าน API Route
       fetch('/api/pusher', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event: 'opponent_pnl',
+          event: 'opponent-update',
           channel: roomId,
           data: { username: myUser?.username, pnl: pnl }
         })
@@ -104,45 +96,85 @@ export default function ArenaPage() {
     }
   }, [currentPrice, position, entryPrice, gameState, isGameOver, roomId, myUser?.username]);
 
-  // ฟังก์ชันช่วย
   const findMatch = async () => {
     setGameState('SEARCHING');
-    // ในระบบจริงตรงนี้ควรมี Server เช็คคิว แต่เพื่อ Vercel 
-    // เราจะส่งเหตุการณ์ "หาคู่" ไปที่ Lobby
+    // จำลองระบบ Matchmaking ส่งชื่อเราเข้า Lobby
     await fetch('/api/pusher', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        event: 'match_start',
-        channel: 'lobby',
+        event: 'match-start',
+        channel: 'lobby-channel',
         data: {
           roomId: `room_${Date.now()}`,
-          players: [myUser, { username: 'Waiting...' }] // ระบบจำลอง
+          players: [myUser, { username: `Trader_${Math.floor(Math.random()*100)}` }] 
         }
       })
     });
   };
 
-  // ... (UI เหมือนเดิมทั้งหมด) ...
+  const handlePriceChange = useCallback((p: number) => setCurrentPrice(p), []);
+
+  if (isGameOver) {
+    const win = unrealizedPnl > (opponent?.currentPnl || 0);
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 text-white">
+        <Trophy className={`w-20 h-20 mb-4 ${win ? 'text-yellow-500' : 'text-gray-500'}`} />
+        <h2 className="text-5xl font-black">{win ? "YOU WIN!" : "YOU LOSE!"}</h2>
+        <button onClick={() => window.location.reload()} className="mt-8 bg-white text-black px-8 py-3 rounded-xl font-bold">PLAY AGAIN</button>
+      </div>
+    );
+  }
+
+  if (gameState !== 'ARENA') {
+    return (
+      <div className="min-h-screen bg-[#13131a] text-white flex flex-col items-center justify-center p-4 text-center">
+        <Trophy className="text-yellow-500 w-16 h-16 mb-6" />
+        <h1 className="text-4xl font-bold mb-4">VS TRAD</h1>
+        <p className="text-green-400 font-mono text-2xl mb-8">${balance.toFixed(2)}</p>
+        {gameState === 'LOBBY' ? (
+          <button onClick={findMatch} className="bg-blue-600 hover:bg-blue-500 px-12 py-4 rounded-2xl font-bold text-xl transition-all active:scale-95">FIND MATCH</button>
+        ) : (
+          <div className="flex flex-col items-center gap-4"><Loader2 className="animate-spin" /><p>Finding opponent...</p></div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#13131a] text-white p-4 flex flex-col font-sans">
-      {/* ส่วน Header, Chart และ Scoreboard เหมือนโค้ดเดิมที่คุณมี */}
-      {gameState === 'LOBBY' || gameState === 'SEARCHING' ? (
-        <div className="flex flex-col items-center justify-center h-full gap-6">
-          <Trophy className="text-yellow-500 w-20 h-20" />
-          <h1 className="text-4xl font-bold">VS TRAD : VERCEL MODE</h1>
-          <button onClick={findMatch} className="bg-blue-600 px-10 py-4 rounded-xl font-bold text-xl active:scale-95">
-            {gameState === 'SEARCHING' ? 'SEARCHING...' : 'FIND MATCH'}
-          </button>
+    <div className="min-h-screen bg-[#13131a] text-white p-4 flex flex-col">
+      <header className="flex justify-between items-center bg-[#1e1e24] p-4 rounded-2xl border border-gray-800 mb-4">
+        <div className="font-bold flex items-center gap-2"><Trophy className="w-4 h-4 text-yellow-500" /> ARENA</div>
+        <div className="bg-black/40 px-4 py-2 rounded-xl border border-red-500/20 font-mono text-red-400 flex items-center gap-2">
+          <Clock className="w-4 h-4" /> {Math.floor(timeLeft/60)}:{(timeLeft%60).toString().padStart(2,'0')}
         </div>
-      ) : (
-        /* UI Arena ของคุณ */
-        <div className="flex flex-col gap-4">
-           {/* กราฟและปุ่มกดเทรด */}
-           <TradingChart onPriceChange={(p) => setCurrentPrice(p)} />
-           <div className="text-center font-mono text-2xl">Time: {timeLeft}s</div>
-           {isGameOver && <div className="text-5xl text-center">GAME OVER!</div>}
+      </header>
+
+      <div className="flex flex-1 gap-4 overflow-hidden">
+        <div className="flex-[3] bg-[#1e1e24] rounded-2xl border border-gray-800 p-2 flex flex-col">
+          <div className="flex justify-between items-center px-4 py-2 border-b border-gray-800 mb-2 font-mono font-bold text-xl">BTC/USDT: {currentPrice.toFixed(2)}</div>
+          <div className="flex-1 relative"><TradingChart onPriceChange={handlePriceChange} /></div>
         </div>
-      )}
+        <div className="flex-[1] flex flex-col gap-4">
+          <div className="flex-1 bg-[#1e1e24] rounded-2xl border border-gray-800 p-4">
+            <h3 className="text-gray-500 text-xs font-bold uppercase mb-4 tracking-widest">Scoreboard</h3>
+            <div className="space-y-3">
+              <div className="flex justify-between p-4 rounded-xl border border-green-500/20 bg-green-500/5"><span className="text-sm font-bold">YOU</span><span className={`font-bold ${unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{unrealizedPnl.toFixed(2)}</span></div>
+              <div className="flex justify-between p-4 rounded-xl border border-gray-700 bg-gray-800/20"><span className="text-sm opacity-50">{opponent?.username || 'Opponent'}</span><span className={`font-bold ${(opponent?.currentPnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{(opponent?.currentPnl || 0).toFixed(2)}</span></div>
+            </div>
+          </div>
+          <div className="bg-[#1e1e24] rounded-2xl border border-gray-800 p-4">
+            {position === 'NONE' ? (
+              <div className="flex gap-3 h-20">
+                <button onClick={() => { setPosition('SHORT'); setEntryPrice(currentPrice); }} className="flex-1 bg-red-600/10 text-red-500 border border-red-500/30 rounded-xl font-bold">SELL</button>
+                <button onClick={() => { setPosition('LONG'); setEntryPrice(currentPrice); }} className="flex-1 bg-green-600/10 text-green-500 border border-green-500/30 rounded-xl font-bold">BUY</button>
+              </div>
+            ) : (
+              <button onClick={() => { setBalance(b => b + unrealizedPnl); setPosition('NONE'); setUnrealizedPnl(0); }} className="w-full bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 py-6 rounded-xl font-bold flex items-center justify-center gap-2"><XCircle /> CLOSE POSITION</button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

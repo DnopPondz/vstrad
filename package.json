@@ -2,12 +2,12 @@
   "name": "vstrad",
   "version": "0.1.0",
   "type": "module",
- "scripts": {
-  "dev": "next dev",
-  "build": "next build",
-  "start": "next start",
-  "lint": "next lint"
-},
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
   "dependencies": {
     "dotenv": "^17.4.0",
     "lightweight-charts": "^5.1.0",
