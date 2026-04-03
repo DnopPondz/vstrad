@@ -1,19 +1,19 @@
+// app/api/pusher/route.ts
 import { NextResponse } from 'next/server';
 import Pusher from 'pusher';
 
 const pusher = new Pusher({
   appId: process.env.PUSHER_APP_ID!,
-  key: process.env.PUSHER_KEY!,
+  key: process.env.NEXT_PUBLIC_PUSHER_KEY!,
   secret: process.env.PUSHER_SECRET!,
-  cluster: process.env.PUSHER_CLUSTER!,
+  cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
   useTLS: true,
 });
 
 export async function POST(req: Request) {
-  const { roomId, username, pnl } = await req.json();
+  const { event, channel, data } = await req.json();
   
-  // ส่งข้อมูลไปหาคู่แข่งผ่าน Pusher
-  await pusher.trigger(roomId, 'opponent_pnl', { username, pnl });
+  await pusher.trigger(channel, event, data);
   
   return NextResponse.json({ success: true });
 }
