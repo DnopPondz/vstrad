@@ -9,25 +9,26 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
-const port = parseInt(process.env.PORT || '3000', 10);
+const hostname = '0.0.0.0'; // ใช้ 0.0.0.0 เพื่อให้เข้าถึงได้จากภายนอก
+const port = parseInt(process.env.PORT || '3000', 10); // ดึง Port จาก Server
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
+// เชื่อมต่อ MongoDB (เพิ่มเงื่อนไขเช็ค URI)
 const connectDB = async () => {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    console.log("⚠️ MONGODB_URI not found, running without database.");
+    return;
+  }
   try {
-    const uri = process.env.MONGODB_URI;
-    if (!uri) throw new Error("⚠️ MONGODB_URI is missing in .env");
     await mongoose.connect(uri);
-    console.log("💾 MongoDB Connected Successfully!");
-  } catch (error) {
-    console.error("❌ MongoDB Connection Error:", error);
-    process.exit(1);
+    console.log("💾 MongoDB Connected!");
+  } catch (err) {
+    console.error("❌ MongoDB connection error:", err);
   }
 };
-
-let waitingQueue: { socketId: string; user: any }[] = [];
 
 app.prepare().then(async () => {
   await connectDB();
@@ -43,58 +44,59 @@ app.prepare().then(async () => {
     }
   });
 
-  const io = new SocketIOServer(server);
+  const io = new SocketIOServer(server, {
+    cors: {
+      origin: "*", // อนุญาตให้ต่อจากที่ไหนก็ได้
+      methods: ["GET", "POST"]
+    }
+  });
+
+  // --- Matchmaking & Socket Logic ---
+  let waitingQueue: any[] = [];
   
-
   io.on('connection', (socket) => {
-    console.log(`🟢 Socket Connected: ${socket.id}`);
+    console.log(`🟢 User Connected: ${socket.id}`);
 
-    socket.on('login', (username: string) => {
-      const userData = { id: socket.id, username, balance: 1000 };
-      socket.emit('login_success', userData);
+    socket.on('login', (username) => {
+      socket.emit('login_success', { username, balance: 1000 });
     });
-    socket.on('update_pnl', (data) => {
-  // หาว่า socket นี้อยู่ในห้องไหน
-  const rooms = Array.from(socket.rooms);
-  const arenaRoom = rooms.find(r => r.startsWith('arena_'));
 
-  if (arenaRoom) {
-    // ส่งคะแนนไปให้คนอื่นในห้อง (ยกเว้นตัวเอง)
-    socket.to(arenaRoom).emit('opponent_pnl', data);
-  }
-});
-
-    socket.on('find_match', (user: any) => {
-      console.log(`🔍 ${user.username} is looking for a match...`);
+    socket.on('find_match', (user) => {
       waitingQueue.push({ socketId: socket.id, user });
-
       if (waitingQueue.length >= 2) {
-        const player1 = waitingQueue.shift()!;
-        const player2 = waitingQueue.shift()!;
+        const p1 = waitingQueue.shift();
+        const p2 = waitingQueue.shift();
         const roomId = `arena_${Date.now()}`;
-
-        const p1Socket = io.sockets.sockets.get(player1.socketId);
-        const p2Socket = io.sockets.sockets.get(player2.socketId);
         
-        if (p1Socket) p1Socket.join(roomId);
-        if (p2Socket) p2Socket.join(roomId);
-
-        console.log(`⚔️ Match Started: ${player1.user.username} vs ${player2.user.username}`);
-
-        io.to(roomId).emit('match_found', {
+        io.to(p1.socketId).to(p2.socketId).emit('match_found', {
           roomId,
-          players: [player1.user, player2.user]
+          players: [p1.user, p2.user],
+          timeLeft: 300
         });
+
+        // จัดการ Timer...
+        let timeLeft = 300;
+        const timer = setInterval(() => {
+          timeLeft--;
+          io.to(roomId).emit('timer_update', timeLeft);
+          if (timeLeft <= 0) {
+            clearInterval(timer);
+            io.to(roomId).emit('game_over');
+          }
+        }, 1000);
       }
     });
 
+    socket.on('update_pnl', (data) => {
+        socket.broadcast.emit('opponent_pnl', data);
+    });
+
     socket.on('disconnect', () => {
-      console.log(`🔴 Socket Disconnected: ${socket.id}`);
-      waitingQueue = waitingQueue.filter(p => p.socketId !== socket.id);
+      waitingQueue = waitingQueue.filter(q => q.socketId !== socket.id);
     });
   });
 
   server.listen(port, () => {
-    console.log(`> 🚀 Ready on http://${hostname}:${port}`);
+    console.log(`> 🚀 Server listening on port ${port}`);
   });
 });
