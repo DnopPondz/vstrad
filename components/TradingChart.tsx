@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import { createChart, ColorType, CandlestickSeries } from "lightweight-charts";
+// 🛑 เพิ่มการ import UTCTimestamp เข้ามาที่บรรทัดนี้
+import { createChart, ColorType, CandlestickSeries, UTCTimestamp } from "lightweight-charts";
 
 interface TradingChartProps {
   onPriceChange?: (price: number) => void;
@@ -14,7 +15,6 @@ export default function TradingChart({ onPriceChange, symbol = "BTCUSDT" }: Trad
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
-    // 🛑 Mapping: ถ้าเลือกทอง (XAUUSD) ให้ดึงข้อมูล PAXGUSDT จาก Binance แทน
     const fetchSymbol = symbol === "XAUUSD" ? "PAXGUSDT" : symbol;
 
     const chart = createChart(chartContainerRef.current, {
@@ -50,13 +50,16 @@ export default function TradingChart({ onPriceChange, symbol = "BTCUSDT" }: Trad
           `https://api.binance.com/api/v3/klines?symbol=${fetchSymbol.toUpperCase()}&interval=1m&limit=100`
         );
         const history = await res.json();
+        
         const formattedHistory = history.map((d: any) => ({
-          time: d[0] / 1000,
+          // 🛑 เติม 'as UTCTimestamp' เพื่อบอก TypeScript ว่านี่คือเวลาที่ถูกต้อง
+          time: (d[0] / 1000) as UTCTimestamp,
           open: parseFloat(d[1]),
           high: parseFloat(d[2]),
           low: parseFloat(d[3]),
           close: parseFloat(d[4]),
         }));
+        
         candlestickSeries.setData(formattedHistory);
 
         const streamName = `${fetchSymbol.toLowerCase()}@kline_1m`;
@@ -67,7 +70,8 @@ export default function TradingChart({ onPriceChange, symbol = "BTCUSDT" }: Trad
           const candle = message.k;
 
           const updatedCandle = {
-            time: candle.t / 1000,
+            // 🛑 เติม 'as UTCTimestamp' ที่นี่ด้วยเช่นกัน
+            time: (candle.t / 1000) as UTCTimestamp,
             open: parseFloat(candle.o),
             high: parseFloat(candle.h),
             low: parseFloat(candle.l),
