@@ -15,15 +15,6 @@ const connectDB = async () => {
   await mongoose.connect(process.env.MONGODB_URI!);
 };
 
-// Schema สำหรับ User
-const UserSchema = new mongoose.Schema({
-  username: String,
-  balance: { type: Number, default: 1000 },
-  winCount: { type: Number, default: 0 },
-});
-const User = mongoose.models.User || mongoose.model('User', UserSchema);
-
-// Schema สำหรับ Matchmaking
 const MatchSchema = new mongoose.Schema({
   username: String,
   status: { type: String, default: 'waiting' },
@@ -31,6 +22,7 @@ const MatchSchema = new mongoose.Schema({
   opponent: String,
   createdAt: { type: Date, default: Date.now, expires: 60 }
 });
+
 const Match = mongoose.models.Match || mongoose.model('Match', MatchSchema);
 
 export async function POST(req: Request) {
@@ -38,11 +30,10 @@ export async function POST(req: Request) {
     const { username } = await req.json();
     await connectDB();
 
-    // เช็คหรือสร้าง User เพื่อดึงยอดเงินปัจจุบัน
-    let userData = await User.findOne({ username });
-    if (!userData) userData = await User.create({ username });
-
+    // ลบคิวเก่าตัวเอง
     await Match.deleteOne({ username, status: 'waiting' });
+
+    // หาคนอื่นที่รออยู่
     const waitingPlayer = await Match.findOne({ status: 'waiting', username: { $ne: username } });
 
     if (waitingPlayer) {
@@ -51,15 +42,15 @@ export async function POST(req: Request) {
       
       await pusher.trigger('lobby-channel', `matched-${waitingPlayer.username}`, {
         roomId,
-        opponent: { username, balance: userData.balance }
+        opponent: { username }
       });
 
-      return NextResponse.json({ status: 'matched', roomId, opponent: { username: waitingPlayer.username }, balance: userData.balance });
+      return NextResponse.json({ status: 'matched', roomId, opponent: { username: waitingPlayer.username } });
     } else {
       await Match.create({ username, status: 'waiting' });
-      return NextResponse.json({ status: 'waiting', balance: userData.balance });
+      return NextResponse.json({ status: 'waiting' });
     }
   } catch (error) {
-    return NextResponse.json({ error: 'System Error' }, { status: 500 });
+    return NextResponse.json({ error: 'DB Error' }, { status: 500 });
   }
 }
