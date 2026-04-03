@@ -12,7 +12,11 @@ const pusher = new Pusher({
 
 const connectDB = async () => {
   if (mongoose.connections[0].readyState) return;
-  await mongoose.connect(process.env.MONGODB_URI!);
+  try {
+    await mongoose.connect(process.env.MONGODB_URI!);
+  } catch (error) {
+    console.error("MongoDB Connect Error:", error);
+  }
 };
 
 const MatchSchema = new mongoose.Schema({
@@ -30,12 +34,18 @@ export async function POST(req: Request) {
     const { username } = await req.json();
     await connectDB();
 
+    // 1. ลบคิวเก่าที่ค้างของตัวเอง (ถ้ามี)
+    await Match.deleteOne({ username, status: 'waiting' });
+
+    // 2. หาคนอื่นที่รออยู่
     const waitingPlayer = await Match.findOne({ status: 'waiting', username: { $ne: username } });
 
     if (waitingPlayer) {
       const roomId = `room_${Date.now()}`;
+      // อัปเดตฝั่งคนรอ
       await Match.findByIdAndUpdate(waitingPlayer._id, { status: 'matched', opponent: username, roomId });
       
+      // ยิง Pusher แจ้งคนรอ
       await pusher.trigger('lobby-channel', `matched-${waitingPlayer.username}`, {
         roomId,
         opponent: { username }
@@ -43,10 +53,12 @@ export async function POST(req: Request) {
 
       return NextResponse.json({ status: 'matched', roomId, opponent: { username: waitingPlayer.username } });
     } else {
-      await Match.findOneAndUpdate({ username }, { status: 'waiting', createdAt: new Date() }, { upsert: true });
+      // ไม่มีคนรอ -> ลงชื่อรอเอง
+      await Match.create({ username, status: 'waiting' });
       return NextResponse.json({ status: 'waiting' });
     }
   } catch (error) {
-    return NextResponse.json({ error: 'DB Error' }, { status: 500 });
+    console.error("Matchmake API Error:", error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
