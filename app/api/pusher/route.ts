@@ -15,6 +15,6 @@ export async function POST(req: Request) {
     await pusher.trigger(channel, event, data);
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ success: false, error }, { status: 500 });
+    return NextResponse.json({ success: false }, { status: 500 });
   }
 }
