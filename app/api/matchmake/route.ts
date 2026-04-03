@@ -10,6 +10,11 @@ const pusher = new Pusher({
   useTLS: true,
 });
 
+const connectDB = async () => {
+  if (mongoose.connections[0].readyState) return;
+  await mongoose.connect(process.env.MONGODB_URI!);
+};
+
 const MatchSchema = new mongoose.Schema({
   username: String,
   status: { type: String, default: 'waiting' },
@@ -23,16 +28,14 @@ const Match = mongoose.models.Match || mongoose.model('Match', MatchSchema);
 export async function POST(req: Request) {
   try {
     const { username } = await req.json();
-    if (!mongoose.connections[0].readyState) await mongoose.connect(process.env.MONGODB_URI!);
+    await connectDB();
 
-    // หาคนรอที่ไม่ใช่เรา
     const waitingPlayer = await Match.findOne({ status: 'waiting', username: { $ne: username } });
 
     if (waitingPlayer) {
       const roomId = `room_${Date.now()}`;
       await Match.findByIdAndUpdate(waitingPlayer._id, { status: 'matched', opponent: username, roomId });
       
-      // แจ้งคนแรกผ่าน Pusher
       await pusher.trigger('lobby-channel', `matched-${waitingPlayer.username}`, {
         roomId,
         opponent: { username }
@@ -40,7 +43,6 @@ export async function POST(req: Request) {
 
       return NextResponse.json({ status: 'matched', roomId, opponent: { username: waitingPlayer.username } });
     } else {
-      // ลงคิวรอเอง
       await Match.findOneAndUpdate({ username }, { status: 'waiting', createdAt: new Date() }, { upsert: true });
       return NextResponse.json({ status: 'waiting' });
     }
