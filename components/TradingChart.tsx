@@ -5,33 +5,35 @@ import { createChart, ColorType, CandlestickSeries } from "lightweight-charts";
 
 interface TradingChartProps {
   onPriceChange?: (price: number) => void;
+  symbol?: string;
 }
 
-export default function TradingChart({ onPriceChange }: TradingChartProps) {
+export default function TradingChart({ onPriceChange, symbol = "BTCUSDT" }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
-    // 1. สร้างตัวกราฟ
+    // 🛑 Mapping: ถ้าเลือกทอง (XAUUSD) ให้ดึงข้อมูล PAXGUSDT จาก Binance แทน
+    const fetchSymbol = symbol === "XAUUSD" ? "PAXGUSDT" : symbol;
+
     const chart = createChart(chartContainerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#1e1e24" },
+        background: { type: ColorType.Solid, color: "#000000" },
         textColor: "#C3C6CE",
       },
       grid: {
-        vertLines: { color: "#2B2B43" },
-        horzLines: { color: "#2B2B43" },
+        vertLines: { color: "#1f1f1f" },
+        horzLines: { color: "#1f1f1f" },
       },
       timeScale: {
         timeVisible: true,
-        secondsVisible: false,
+        secondsVisible: true,
       },
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
     });
 
-    // 2. สร้างซีรีส์แท่งเทียน
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#26a69a",
       downColor: "#ef5350",
@@ -40,63 +42,48 @@ export default function TradingChart({ onPriceChange }: TradingChartProps) {
       wickDownColor: "#ef5350",
     });
 
-    let intervalId: NodeJS.Timeout;
+    let socket: WebSocket;
 
-    // 3. ฟังก์ชันดึงข้อมูลกราฟจริง (Replay Engine)
-    const fetchRealData = async () => {
+    const initChart = async () => {
       try {
-        // ดึงกราฟ BTCUSDT ย้อนหลังแบบ 1 นาที จำนวน 200 แท่ง จาก Binance API
-        const res = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=200");
-        const data = await res.json();
-
-        // แปลงข้อมูลให้อยู่ในรูปแบบที่ lightweight-charts ต้องการ
-        const formattedData = data.map((d: any) => ({
-          time: d[0] / 1000, // เวลา (Binance ส่งมาเป็น Millisecond ต้องหาร 1000)
+        const res = await fetch(
+          `https://api.binance.com/api/v3/klines?symbol=${fetchSymbol.toUpperCase()}&interval=1m&limit=100`
+        );
+        const history = await res.json();
+        const formattedHistory = history.map((d: any) => ({
+          time: d[0] / 1000,
           open: parseFloat(d[1]),
           high: parseFloat(d[2]),
           low: parseFloat(d[3]),
           close: parseFloat(d[4]),
         }));
+        candlestickSeries.setData(formattedHistory);
 
-        // แบ่งข้อมูลเป็น 2 ส่วน
-        const historyData = formattedData.slice(0, 100); // อดีต: 100 แท่งแรก
-        const futureData = formattedData.slice(100);     // อนาคต: 100 แท่งหลังเอาไว้ Replay
+        const streamName = `${fetchSymbol.toLowerCase()}@kline_1m`;
+        socket = new WebSocket(`wss://stream.binance.com:9443/ws/${streamName}`);
 
-        // วาดกราฟอดีตลงไปบนจอ
-        candlestickSeries.setData(historyData);
+        socket.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          const candle = message.k;
 
-        // ส่งราคาปิดล่าสุดไปให้ UI หน้าหลัก (เช่น ราคาแถวๆ 60,000+)
-        let currentClose = historyData[historyData.length - 1].close;
-        if (onPriceChange) onPriceChange(currentClose);
+          const updatedCandle = {
+            time: candle.t / 1000,
+            open: parseFloat(candle.o),
+            high: parseFloat(candle.h),
+            low: parseFloat(candle.l),
+            close: parseFloat(candle.c),
+          };
 
-        // 4. เริ่มระบบ Replay: ปล่อยกราฟอนาคตทีละแท่ง
-        let currentIndex = 0;
-        intervalId = setInterval(() => {
-          if (currentIndex < futureData.length) {
-            const nextCandle = futureData[currentIndex];
-            
-            // อัปเดตกราฟแท่งใหม่เข้าไป
-            candlestickSeries.update(nextCandle);
-            
-            // อัปเดตราคาล่าสุดส่งไปหน้า Dashboard ทันที
-            if (onPriceChange) onPriceChange(nextCandle.close);
-            
-            currentIndex++;
-          } else {
-            // ถ้ารันกราฟหมด 100 แท่งแล้ว ให้หยุด (จบเกม)
-            clearInterval(intervalId);
-          }
-        }, 1000); // ปล่อยแท่งใหม่ทุกๆ 1 วินาที (ในอนาคตปรับให้เร็วขึ้นได้ถ้าอยากให้กดดัน)
-
+          candlestickSeries.update(updatedCandle);
+          if (onPriceChange) onPriceChange(updatedCandle.close);
+        };
       } catch (error) {
-        console.error("Error fetching chart data:", error);
+        console.error("Error connecting to Binance:", error);
       }
     };
 
-    // เรียกใช้ฟังก์ชันดึงข้อมูล
-    fetchRealData();
+    initChart();
 
-    // ปรับขนาดกราฟเวลากดย่อ/ขยายหน้าต่าง
     const handleResize = () => {
       if (chartContainerRef.current) {
         chart.applyOptions({
@@ -107,15 +94,12 @@ export default function TradingChart({ onPriceChange }: TradingChartProps) {
     };
     window.addEventListener("resize", handleResize);
 
-    // ทำความสะอาดเวลาปิดหน้าเว็บ
     return () => {
-      clearInterval(intervalId);
+      if (socket) socket.close();
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-    
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
+  }, [symbol, onPriceChange]);
 
-  return <div ref={chartContainerRef} className="w-full h-full rounded-lg overflow-hidden border border-gray-800" />;
+  return <div ref={chartContainerRef} className="w-full h-full relative" />;
 }

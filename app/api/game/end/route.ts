@@ -1,4 +1,3 @@
-// app/api/game/end/route.ts
 import { NextResponse } from 'next/server';
 import mongoose from 'mongoose';
 
@@ -7,7 +6,7 @@ const connectDB = async () => {
   await mongoose.connect(process.env.MONGODB_URI!);
 };
 
-// 🛑 ต้องใส่ Schema ให้ครบทุกครั้ง เพื่อป้องกัน Vercel Build Error
+// 🛑 ต้องประกาศ Schema ให้ครบป้องกัน Error ตอน Build
 const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true },
   password: { type: String },
@@ -17,29 +16,22 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
-const HistorySchema = new mongoose.Schema({
-  username: String, 
-  opponent: String, 
-  pnl: Number, 
-  result: String, 
-  symbol: String, 
-  date: { type: Date, default: Date.now }
-});
-const History = mongoose.models.History || mongoose.model('History', HistorySchema);
-
 export async function POST(req: Request) {
   try {
-    const { username, opponent, pnl, result, symbol } = await req.json();
+    const { username, pnl, isMidGame } = await req.json();
     await connectDB();
 
-    const isWin = result === 'WIN';
-    await User.findOneAndUpdate(
+    // อัปเดตเงิน และขอข้อมูลใหม่กลับมาทันที
+    const updatedUser = await User.findOneAndUpdate(
       { username }, 
-      { $inc: { balance: pnl, winCount: isWin ? 1 : 0, totalMatches: 1 } }
+      { $inc: { balance: pnl, totalMatches: isMidGame ? 0 : 1 } },
+      { new: true }
     );
-    await History.create({ username, opponent, pnl, result, symbol });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ 
+      success: true, 
+      newBalance: updatedUser.balance 
+    });
   } catch (error) {
     return NextResponse.json({ success: false, error: 'System Error' }, { status: 500 });
   }
