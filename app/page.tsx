@@ -6,7 +6,6 @@ import TradingChart from "@/components/TradingChart";
 import { Trophy, Loader2, Swords, Clock, Snowflake, Ghost, Wallet, TrendingUp, XCircle, MessageSquare, History, RefreshCw, Users, LogOut, Skull, LineChart, Lock, User as UserIcon, LogIn, UserPlus } from "lucide-react";
 
 export default function ArenaPage() {
-  // 🛑 เพิ่มสถานะ AUTH เป็นหน้าแรก
   const [gameState, setGameState] = useState<'AUTH' | 'LOBBY' | 'HOSTING' | 'ARENA' | 'FREE_TRADE'>('AUTH');
   
   // Auth States
@@ -45,7 +44,6 @@ export default function ArenaPage() {
   const [entryPrice, setEntryPrice] = useState(0);
   const [unrealizedPnl, setUnrealizedPnl] = useState(0);
 
-  // เช็ค Session เดิม
   useEffect(() => {
     const savedUser = localStorage.getItem('vstrad_user');
     if (savedUser) {
@@ -54,7 +52,6 @@ export default function ArenaPage() {
     }
   }, []);
 
-  // 🛑 ฟังก์ชันล็อกอิน / สมัครสมาชิก
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
@@ -90,7 +87,7 @@ export default function ArenaPage() {
     try {
       const res = await fetch('/api/matchmake', { method: 'POST', body: JSON.stringify({ action: 'FETCH_LOBBY', username: myUser.username }) });
       const data = await res.json();
-      if (data.error === 'Unauthorized User') return logout(); // ดักกรณีลบ DB แล้วค้าง
+      if (data.error === 'Unauthorized User') return logout();
       
       setBalance(data.balance || 0);
       setLeaderboard(data.leaderboard || []);
@@ -218,7 +215,6 @@ export default function ArenaPage() {
     }
   }, [isGameOver, forceResult, gameState]);
 
-  // ----- UI: หน้า Login / Register -----
   if (gameState === 'AUTH') {
     return (
       <div className="min-h-screen bg-[#0b0b10] flex flex-col items-center justify-center p-6 font-sans text-white relative overflow-hidden">
@@ -257,7 +253,6 @@ export default function ArenaPage() {
     );
   }
 
-  // ----- UI: Game Results -----
   if (isGameOver) {
     let isWin = gameState === 'FREE_TRADE' ? unrealizedPnl > 0 : (forceResult !== null ? forceResult === 'WIN' : unrealizedPnl > (opponent?.currentPnl || 0));
     return (
@@ -294,7 +289,7 @@ export default function ArenaPage() {
       {isFoggy && <div className="fixed inset-0 bg-white/10 backdrop-blur-xl z-[100] animate-pulse pointer-events-none" />}
       {isFrozen && <div className="fixed inset-0 bg-blue-500/20 z-[101] pointer-events-none border-[20px] border-blue-400/30" />}
       {quickChatMsg && gameState === 'ARENA' && (
-        <div className="fixed top-20 right-10 z-[110] bg-white text-black font-bold px-6 py-3 rounded-2xl shadow-2xl animate-bounce flex gap-2"><MessageSquare /> {opponent?.username}: "{quickChatMsg}"</div>
+        <div className="fixed top-20 right-10 z-[110] bg-white text-black font-bold px-6 py-3 rounded-2xl shadow-2xl animate-bounce flex gap-2"><MessageSquare /> {opponent?.username} Says: &quot;{quickChatMsg}&quot;</div>
       )}
 
       {gameState === 'LOBBY' ? (
@@ -324,7 +319,6 @@ export default function ArenaPage() {
                   ))}
                 </div>
                 
-                {/* 🛑 ล็อกปุ่มถ้าเงินไม่ถึง 100 USD */}
                 <button onClick={createRoom} disabled={balance < 100} className={`w-full py-5 rounded-2xl font-black text-xl flex justify-center items-center gap-2 transition-all ${balance < 100 ? 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700' : 'bg-blue-600 hover:bg-blue-500 active:scale-95 shadow-lg shadow-blue-900/40'}`}>
                    {balance < 100 ? <><Lock size={20} /> NEED $100 TO HOST</> : "CREATE ROOM"}
                 </button>
@@ -362,12 +356,11 @@ export default function ArenaPage() {
                   availableRooms.map((room: any) => (
                     <div key={room.roomId} className="flex justify-between items-center p-4 bg-black/60 rounded-2xl border border-white/5">
                       <div className="flex flex-col">
-                        <span className="font-black text-lg text-blue-400">{room.host}'s Room</span>
+                        <span className="font-black text-lg text-blue-400">{room.host}&apos;s Room</span>
                         <div className="flex gap-3 text-xs font-bold text-gray-400 mt-1">
                           <span className="bg-white/10 px-2 py-1 rounded">{room.symbol}</span><span className="text-purple-400 bg-purple-400/10 px-2 py-1 rounded">{room.leverage}x Lev</span>
                         </div>
                       </div>
-                      {/* 🛑 ล็อกปุ่มถ้าเงินไม่ถึง 100 USD */}
                       <button onClick={() => joinRoom(room.roomId)} disabled={balance < 100} className={`px-8 py-3 rounded-xl font-black transition-all ${balance < 100 ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : 'bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600 hover:text-white'}`}>
                         {balance < 100 ? <Lock size={18}/> : "JOIN"}
                       </button>
@@ -379,7 +372,6 @@ export default function ArenaPage() {
           </div>
         </div>
       ) : (
-        /* หน้าจอเทรด (เหมือนเดิม) */
         <div className="max-w-7xl mx-auto flex flex-col gap-4">
           <header className="flex justify-between items-center bg-[#16161e] p-4 rounded-2xl border border-white/5">
             <div className="text-red-400 font-black text-xl flex gap-2 items-center"><Clock /> {Math.floor(timeLeft/60)}:{(timeLeft%60).toString().padStart(2,'0')}</div>
